@@ -1,0 +1,56 @@
+# ----------------------
+# OS generated files
+# ----------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ----------------------
+# Editor / IDE
+# ----------------------
+.vscode/
+
+
+# ----------------------
+# Logs
+# ----------------------
+*.log
+logs/
+
+
+# ----------------------
+# Environment variables
+# ----------------------
+.env
+.env.*
+*.env
+
+
+# ----------------------
+# Dependency directories
+# ----------------------
+node_modules/
+venv/
+.env/
+__pycache__/
+.venv/
+
+
+# ----------------------
+# Python specific
+# ----------------------
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+*.egg-info/
+dist/
+build/
+
+
+# ----------------------
+# Docker
+# ----------------------
+*.pid
+*.seed
+*.pid.lock
