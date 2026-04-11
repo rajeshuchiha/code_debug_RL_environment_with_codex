@@ -1,255 +1,197 @@
 ---
-title: Coding Env Environment Server
-emoji: 🥉
-colorFrom: pink
-colorTo: purple
+title: Coding Env Debugging Environment Server
+emoji: tools
+colorFrom: blue
+colorTo: green
 sdk: docker
 pinned: false
 app_port: 8000
 base_path: /web
 tags:
   - openenv
+  - debugging
+  - reinforcement-learning
 ---
 
-# Coding Env Environment
+# Coding Env Debugging Environment
 
-A simple test environment that echoes back messages. Perfect for testing the env APIs as well as demonstrating environment usage patterns.
+`coding_env` is an OpenEnv environment for deterministic code-debugging reinforcement learning. The agent receives buggy Python source code, edits it line by line, runs tests, inspects variables, and uses stack traces to repair the target function.
+
+The current task starts with a buggy `summarize_numbers(numbers)` implementation and a fixed test suite. The episode ends when all tests pass or the maximum step count is reached.
+
+## Action Space
+
+Actions are typed through `CodingAction` in `models.py`.
+
+```python
+CodingAction(action_type="edit_line", line_no=4, new_code="    total = 0")
+CodingAction(action_type="insert_line", line_no=3, code="    print(numbers)")
+CodingAction(action_type="delete_line", line_no=7)
+CodingAction(action_type="run_tests")
+CodingAction(action_type="inspect_variable", var_name="total")
+CodingAction(action_type="get_stack_trace")
+```
+
+Supported action types:
+
+- `edit_line(line_no, new_code)`: Replace a 1-based line with new code.
+- `insert_line(line_no, code)`: Insert code before a 1-based line.
+- `delete_line(line_no)`: Delete a 1-based line.
+- `run_tests()`: Execute the deterministic test suite.
+- `inspect_variable(var_name)`: Capture a variable value during execution.
+- `get_stack_trace()`: Return the last stack trace, or run tests if none exists.
+
+## Observation Space
+
+Each `CodingObservation` includes:
+
+- `code`: Current source code.
+- `stdout`: Captured stdout from the last subprocess execution.
+- `stderr`: Captured stderr from the last subprocess execution.
+- `exception`: Last exception message, if any.
+- `stack_trace`: Last traceback, if any.
+- `test_results`: Per-test dictionaries containing `input`, `expected`, `actual`, and `passed`.
+- `variables`: Values captured by variable inspection.
+- `step_count`: Current episode step count.
+- `done`: Whether the episode is complete.
+- `reward`: Reward from the most recent action.
+
+## Reward Function
+
+The environment uses the project reward policy:
+
+- `+1.0` when all tests pass.
+- `+0.3` when the number of passed tests improves.
+- `-0.2` for runtime or syntax errors.
+- `-0.05` per step.
+- `-0.5` for timeouts.
+
+Code execution always happens in a subprocess with a 2-second timeout.
 
 ## Quick Start
 
-The simplest way to use the Coding Env environment is through the `CodingEnv` class:
-
-```python
-from coding_env import CodingAction, CodingEnv
-
-try:
-    # Create environment from Docker image
-    coding_envenv = CodingEnv.from_docker_image("coding_env-env:latest")
-
-    # Reset
-    result = coding_envenv.reset()
-    print(f"Reset: {result.observation.echoed_message}")
-
-    # Send multiple messages
-    messages = ["Hello, World!", "Testing echo", "Final message"]
-
-    for msg in messages:
-        result = coding_envenv.step(CodingAction(message=msg))
-        print(f"Sent: '{msg}'")
-        print(f"  → Echoed: '{result.observation.echoed_message}'")
-        print(f"  → Length: {result.observation.message_length}")
-        print(f"  → Reward: {result.reward}")
-
-finally:
-    # Always clean up
-    coding_envenv.close()
-```
-
-That's it! The `CodingEnv.from_docker_image()` method handles:
-- Starting the Docker container
-- Waiting for the server to be ready
-- Connecting to the environment
-- Container cleanup when you call `close()`
-
-## Building the Docker Image
-
-Before using the environment, you need to build the Docker image:
+Start the server:
 
 ```bash
-# From project root
+uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
+```
+
+Use the async OpenEnv client:
+
+```python
+import asyncio
+
+from coding_env.client import CodingEnv
+from coding_env.models import CodingAction
+
+
+async def main():
+    env = CodingEnv(base_url="http://localhost:8000")
+    await env.connect()
+    try:
+        result = await env.reset()
+        print(result.observation.code)
+
+        result = await env.step(CodingAction(action_type="run_tests"))
+        print(result.observation.exception)
+        print(result.observation.stack_trace)
+
+        result = await env.step(
+            CodingAction(
+                action_type="edit_line",
+                line_no=7,
+                new_code="    average = total / len(numbers)",
+            )
+        )
+        result = await env.step(
+            CodingAction(action_type="edit_line", line_no=4, new_code="    total = 0")
+        )
+        result = await env.step(CodingAction(action_type="run_tests"))
+        print(result.done, result.reward)
+        print([test.passed for test in result.observation.test_results])
+    finally:
+        await env.close()
+
+
+asyncio.run(main())
+```
+
+## Inference Script
+
+`inference.py` runs an async model-driven debugging loop. It expects the model to return exactly one JSON action per step.
+
+Required or useful environment variables:
+
+```env
+HF_TOKEN=<your-token>
+API_KEY=<optional-api-key>
+API_BASE_URL=https://router.huggingface.co/v1
+MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
+ENV_BASE_URL=http://localhost:8000
+LOCAL_IMAGE_NAME=coding_env-env:latest
+MAX_STEPS=20
+```
+
+Run inference against a local server:
+
+```bash
+python inference.py
+```
+
+If `LOCAL_IMAGE_NAME` or `IMAGE_NAME` is set, `inference.py` starts the environment from Docker through `CodingEnv.from_docker_image(...)`. Otherwise it connects to `ENV_BASE_URL`.
+
+## Docker
+
+Build the Docker image from the environment directory:
+
+```bash
 docker build -t coding_env-env:latest -f server/Dockerfile .
 ```
 
-## Deploying to Hugging Face Spaces
-
-You can easily deploy your OpenEnv environment to Hugging Face Spaces using the `openenv push` command:
+Run it:
 
 ```bash
-# From the environment directory (where openenv.yaml is located)
+docker run --rm -p 8000:8000 coding_env-env:latest
+```
+
+Then connect with:
+
+```bash
+ENV_BASE_URL=http://localhost:8000 python inference.py
+```
+
+## OpenEnv Deployment
+
+Validate and push with the OpenEnv CLI:
+
+```bash
+openenv validate
 openenv push
-
-# Or specify options
-openenv push --namespace my-org --private
 ```
 
-The `openenv push` command will:
-1. Validate that the directory is an OpenEnv environment (checks for `openenv.yaml`)
-2. Prepare a custom build for Hugging Face Docker space (enables web interface)
-3. Upload to Hugging Face (ensuring you're logged in)
+The deployed space exposes:
 
-### Prerequisites
-
-- Authenticate with Hugging Face: The command will prompt for login if not already authenticated
-
-### Options
-
-- `--directory`, `-d`: Directory containing the OpenEnv environment (defaults to current directory)
-- `--repo-id`, `-r`: Repository ID in format 'username/repo-name' (defaults to 'username/env-name' from openenv.yaml)
-- `--base-image`, `-b`: Base Docker image to use (overrides Dockerfile FROM)
-- `--private`: Deploy the space as private (default: public)
-
-### Examples
-
-```bash
-# Push to your personal namespace (defaults to username/env-name from openenv.yaml)
-openenv push
-
-# Push to a specific repository
-openenv push --repo-id my-org/my-env
-
-# Push with a custom base image
-openenv push --base-image ghcr.io/meta-pytorch/openenv-base:latest
-
-# Push as a private space
-openenv push --private
-
-# Combine options
-openenv push --repo-id my-org/my-env --base-image custom-base:latest --private
-```
-
-After deployment, your space will be available at:
-`https://huggingface.co/spaces/<repo-id>`
-
-The deployed space includes:
-- **Web Interface** at `/web` - Interactive UI for exploring the environment
-- **API Documentation** at `/docs` - Full OpenAPI/Swagger interface
-- **Health Check** at `/health` - Container health monitoring
-- **WebSocket** at `/ws` - Persistent session endpoint for low-latency interactions
-
-## Environment Details
-
-### Action
-**CodingAction**: Contains a single field
-- `message` (str) - The message to echo back
-
-### Observation
-**CodingObservation**: Contains the echo response and metadata
-- `echoed_message` (str) - The message echoed back
-- `message_length` (int) - Length of the message
-- `reward` (float) - Reward based on message length (length × 0.1)
-- `done` (bool) - Always False for echo environment
-- `metadata` (dict) - Additional info like step count
-
-### Reward
-The reward is calculated as: `message_length × 0.1`
-- "Hi" → reward: 0.2
-- "Hello, World!" → reward: 1.3
-- Empty message → reward: 0.0
-
-## Advanced Usage
-
-### Connecting to an Existing Server
-
-If you already have a Coding Env environment server running, you can connect directly:
-
-```python
-from coding_env import CodingEnv
-
-# Connect to existing server
-coding_envenv = CodingEnv(base_url="<ENV_HTTP_URL_HERE>")
-
-# Use as normal
-result = coding_envenv.reset()
-result = coding_envenv.step(CodingAction(message="Hello!"))
-```
-
-Note: When connecting to an existing server, `coding_envenv.close()` will NOT stop the server.
-
-### Using the Context Manager
-
-The client supports context manager usage for automatic connection management:
-
-```python
-from coding_env import CodingAction, CodingEnv
-
-# Connect with context manager (auto-connects and closes)
-with CodingEnv(base_url="http://localhost:8000") as env:
-    result = env.reset()
-    print(f"Reset: {result.observation.echoed_message}")
-    # Multiple steps with low latency
-    for msg in ["Hello", "World", "!"]:
-        result = env.step(CodingAction(message=msg))
-        print(f"Echoed: {result.observation.echoed_message}")
-```
-
-The client uses WebSocket connections for:
-- **Lower latency**: No HTTP connection overhead per request
-- **Persistent session**: Server maintains your environment state
-- **Efficient for episodes**: Better for many sequential steps
-
-### Concurrent WebSocket Sessions
-
-The server supports multiple concurrent WebSocket connections. To enable this,
-modify `server/app.py` to use factory mode:
-
-```python
-# In server/app.py - use factory mode for concurrent sessions
-app = create_app(
-    CodingEnvironment,  # Pass class, not instance
-    CodingAction,
-    CodingObservation,
-    max_concurrent_envs=4,  # Allow 4 concurrent sessions
-)
-```
-
-Then multiple clients can connect simultaneously:
-
-```python
-from coding_env import CodingAction, CodingEnv
-from concurrent.futures import ThreadPoolExecutor
-
-def run_episode(client_id: int):
-    with CodingEnv(base_url="http://localhost:8000") as env:
-        result = env.reset()
-        for i in range(10):
-            result = env.step(CodingAction(message=f"Client {client_id}, step {i}"))
-        return client_id, result.observation.message_length
-
-# Run 4 episodes concurrently
-with ThreadPoolExecutor(max_workers=4) as executor:
-    results = list(executor.map(run_episode, range(4)))
-```
-
-## Development & Testing
-
-### Direct Environment Testing
-
-Test the environment logic directly without starting the HTTP server:
-
-```bash
-# From the server directory
-python3 server/coding_env_environment.py
-```
-
-This verifies that:
-- Environment resets correctly
-- Step executes actions properly
-- State tracking works
-- Rewards are calculated correctly
-
-### Running Locally
-
-Run the server locally for development:
-
-```bash
-uvicorn server.app:app --reload
-```
+- `/web`: Interactive OpenEnv web UI.
+- `/docs`: FastAPI/OpenAPI documentation.
+- `/health`: Health check.
+- `/ws`: WebSocket endpoint used by the OpenEnv client.
 
 ## Project Structure
 
-```
+```text
 coding_env/
-├── .dockerignore         # Docker build exclusions
-├── __init__.py            # Module exports
-├── README.md              # This file
-├── openenv.yaml           # OpenEnv manifest
-├── pyproject.toml         # Project metadata and dependencies
-├── uv.lock                # Locked dependencies (generated)
-├── client.py              # CodingEnv client
-├── models.py              # Action and Observation models
-└── server/
-    ├── __init__.py        # Server module exports
-    ├── coding_env_environment.py  # Core environment logic
-    ├── app.py             # FastAPI application (HTTP + WebSocket endpoints)
-    └── Dockerfile         # Container image definition
+|-- __init__.py
+|-- README.md
+|-- client.py
+|-- inference.py
+|-- models.py
+|-- openenv.yaml
+|-- pyproject.toml
+|-- uv.lock
+`-- server/
+    |-- __init__.py
+    |-- app.py
+    |-- coding_env_environment.py
+    |-- Dockerfile
+    `-- requirements.txt
 ```

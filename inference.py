@@ -9,6 +9,7 @@ import sys
 import textwrap
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from dotenv import load_dotenv
 
 from openai import OpenAI
 
@@ -19,6 +20,8 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from client import CodingEnv
     from models import CodingAction, CodingObservation
+    
+load_dotenv()
 
 IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME") or os.getenv("IMAGE_NAME")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
