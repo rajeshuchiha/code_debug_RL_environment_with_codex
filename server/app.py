@@ -37,7 +37,7 @@ except Exception as e:  # pragma: no cover
 
 try:
     from models import CodingAction, CodingObservation
-    from .coding_env_environment import CodingEnvironment
+    from coding_env_environment import CodingEnvironment
 except ModuleNotFoundError:
     from models import CodingAction, CodingObservation
     from server.coding_env_environment import CodingEnvironment

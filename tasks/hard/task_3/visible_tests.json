@@ -1,0 +1,22 @@
+[
+  {
+    "function_name": "longest_unique_substring",
+    "input": ["abcabcbb"],
+    "expected": 3
+  },
+  {
+    "function_name": "longest_unique_substring",
+    "input": ["bbbbb"],
+    "expected": 1
+  },
+  {
+    "function_name": "longest_unique_substring",
+    "input": ["pwwkew"],
+    "expected": 3
+  },
+  {
+    "function_name": "longest_unique_substring",
+    "input": [""],
+    "expected": 0
+  }
+]

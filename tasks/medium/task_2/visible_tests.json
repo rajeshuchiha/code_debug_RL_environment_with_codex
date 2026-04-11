@@ -1,0 +1,22 @@
+[
+  {
+    "function_name": "is_palindrome",
+    "input": ["level"],
+    "expected": true
+  },
+  {
+    "function_name": "is_palindrome",
+    "input": ["A man a plan a canal Panama"],
+    "expected": true
+  },
+  {
+    "function_name": "is_palindrome",
+    "input": ["hello"],
+    "expected": false
+  },
+  {
+    "function_name": "is_palindrome",
+    "input": ["RaceCar"],
+    "expected": true
+  }
+]

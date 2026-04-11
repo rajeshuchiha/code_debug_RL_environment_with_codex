@@ -17,15 +17,15 @@ tags:
 
 `coding_env` is an OpenEnv environment for deterministic code-debugging reinforcement learning. The agent receives buggy Python source code, edits it line by line, runs tests, inspects variables, and uses stack traces to repair the target function.
 
-The current task starts with a buggy `summarize_numbers(numbers)` implementation and a fixed test suite. The episode ends when all tests pass or the maximum step count is reached.
+Tasks are loaded from `tasks/{difficulty}/task_x/` through `tasks.loader.load_task(...)`. Each task provides a `code.py` file and a `visible_tests.json` file. The episode ends when all visible tests pass or the maximum step count is reached.
 
 ## Action Space
 
 Actions are typed through `CodingAction` in `models.py`.
 
 ```python
-CodingAction(action_type="edit_line", line_no=4, new_code="    total = 0")
-CodingAction(action_type="insert_line", line_no=3, code="    print(numbers)")
+CodingAction(action_type="edit_line", line_no=2, new_code="    return a + b")
+CodingAction(action_type="insert_line", line_no=1, code="import math")
 CodingAction(action_type="delete_line", line_no=7)
 CodingAction(action_type="run_tests")
 CodingAction(action_type="inspect_variable", var_name="total")
@@ -55,6 +55,41 @@ Each `CodingObservation` includes:
 - `step_count`: Current episode step count.
 - `done`: Whether the episode is complete.
 - `reward`: Reward from the most recent action.
+- `metadata`: Includes `max_steps`, `tests_passed`, `total_tests`, `difficulty`, `task_name`, and `visible_tests`.
+
+## Task System
+
+Tasks live under `tasks/` and are grouped by difficulty:
+
+```text
+tasks/
+|-- easy/
+|   |-- task_1/
+|   |   |-- code.py
+|   |   `-- visible_tests.json
+|-- medium/
+`-- hard/
+```
+
+Each `visible_tests.json` entry uses this shape:
+
+```json
+{
+  "function_name": "final_price",
+  "input": [100, 25],
+  "expected": 75.0
+}
+```
+
+`function_name` tells the runner which function to call. `input` is unpacked as positional arguments. `expected` is compared to the actual return value.
+
+You can select a task during reset:
+
+```python
+result = await env.reset(difficulty="medium", task_name="task_1")
+```
+
+If `task_name` is omitted, the loader uses deterministic seeded selection by difficulty.
 
 ## Reward Function
 
@@ -89,8 +124,9 @@ async def main():
     env = CodingEnv(base_url="http://localhost:8000")
     await env.connect()
     try:
-        result = await env.reset()
+        result = await env.reset(difficulty="easy", task_name="task_1")
         print(result.observation.code)
+        print(result.observation.metadata["visible_tests"])
 
         result = await env.step(CodingAction(action_type="run_tests"))
         print(result.observation.exception)
@@ -99,12 +135,12 @@ async def main():
         result = await env.step(
             CodingAction(
                 action_type="edit_line",
-                line_no=7,
-                new_code="    average = total / len(numbers)",
+                line_no=1,
+                new_code="def add_numbers(a, b):",
             )
         )
         result = await env.step(
-            CodingAction(action_type="edit_line", line_no=4, new_code="    total = 0")
+            CodingAction(action_type="edit_line", line_no=2, new_code="    return a + b")
         )
         result = await env.step(CodingAction(action_type="run_tests"))
         print(result.done, result.reward)
@@ -130,6 +166,9 @@ MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
 ENV_BASE_URL=http://localhost:8000
 LOCAL_IMAGE_NAME=coding_env-env:latest
 MAX_STEPS=20
+TASK_DIFFICULTY=easy
+TASK_ID=task_1
+OPEN_API_KEY=<your-token>
 ```
 
 Run inference against a local server:
@@ -139,6 +178,8 @@ python inference.py
 ```
 
 If `LOCAL_IMAGE_NAME` or `IMAGE_NAME` is set, `inference.py` starts the environment from Docker through `CodingEnv.from_docker_image(...)`. Otherwise it connects to `ENV_BASE_URL`.
+
+`inference.py` passes `TASK_DIFFICULTY` and optional `TASK_ID` to `env.reset(...)`. It also includes the selected task metadata and `visible_tests` in the model prompt so the model can reason from the allowed public tests before choosing actions.
 
 ## Docker
 
@@ -187,6 +228,12 @@ coding_env/
 |-- models.py
 |-- openenv.yaml
 |-- pyproject.toml
+|-- tasks/
+|   |-- __init__.py
+|   |-- loader.py
+|   |-- easy/
+|   |-- medium/
+|   `-- hard/
 |-- uv.lock
 `-- server/
     |-- __init__.py

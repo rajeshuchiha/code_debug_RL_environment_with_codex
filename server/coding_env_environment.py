@@ -23,41 +23,13 @@ from openenv.core.env_server.types import State
 
 try:
     from models import CodingAction, CodingObservation, TestCaseResult
+    from tasks import load_task
 except ImportError:
+    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     from models import CodingAction, CodingObservation, TestCaseResult
+    from tasks import load_task
 
 
-INITIAL_CODE = """def summarize_numbers(numbers):
-    if not numbers:
-        return {"total": 0, "average": 0, "min": None, "max": None}
-    total = 1
-    for value in numbers:
-        total += value
-    average = total / len(value)
-    return {
-        "total": total,
-        "average": average,
-        "min": min(numbers),
-        "max": max(numbers),
-    }
-"""
-
-TEST_CASES = [
-    {
-        "input": [2, 4, 6],
-        "expected": {"total": 12, "average": 4.0, "min": 2, "max": 6},
-    },
-    {
-        "input": [5],
-        "expected": {"total": 5, "average": 5.0, "min": 5, "max": 5},
-    },
-    {
-        "input": [],
-        "expected": {"total": 0, "average": 0, "min": None, "max": None},
-    },
-]
-
-TARGET_FUNCTION = "summarize_numbers"
 EXECUTION_TIMEOUT_S = 2.0
 TEMP_ROOT = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".runtime")
 
@@ -67,12 +39,23 @@ class CodingEnvironment(Environment):
 
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
-    def __init__(self, max_steps: int = 20):
+    def __init__(
+        self,
+        max_steps: int = 20,
+        difficulty: str = "easy",
+        task_name: Optional[str] = None,
+        task_seed: Optional[int] = 0,
+    ):
         super().__init__()
         self.max_steps = max_steps
+        self.difficulty = difficulty
+        self.task_name = task_name
+        self.task_seed = task_seed
         os.makedirs(TEMP_ROOT, exist_ok=True)
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self._code_lines: List[str] = []
+        self._task: Dict[str, Any] = {}
+        self._test_cases: List[Dict[str, Any]] = []
         self._last_stdout = ""
         self._last_stderr = ""
         self._last_exception = ""
@@ -89,12 +72,16 @@ class CodingEnvironment(Environment):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> CodingObservation:
-        del seed, kwargs
+        difficulty = str(kwargs.pop("difficulty", self.difficulty))
+        task_name = cast(Optional[str], kwargs.pop("task_name", self.task_name))
+        task_seed = self.task_seed if seed is None else seed
+        self._task = load_task(difficulty, task_name=task_name, seed=task_seed)
+        self._test_cases = cast(List[Dict[str, Any]], self._task["visible_tests"])
         self._state = State(
             episode_id=episode_id or str(uuid4()),
             step_count=0,
         )
-        self._code_lines = cast(list[str], INITIAL_CODE.splitlines())
+        self._code_lines = cast(str, self._task["code"]).splitlines()
         self._last_stdout = ""
         self._last_stderr = ""
         self._last_exception = ""
@@ -160,7 +147,10 @@ class CodingEnvironment(Environment):
             metadata={
                 "max_steps": self.max_steps,
                 "tests_passed": self._passed_tests,
-                "total_tests": len(TEST_CASES),
+                "total_tests": len(self._test_cases),
+                "difficulty": self._task.get("difficulty"),
+                "task_name": self._task.get("task_name"),
+                "visible_tests": self._test_cases,
             },
         )
 
@@ -206,7 +196,7 @@ class CodingEnvironment(Environment):
             TestCaseResult(**result) for result in payload.get("test_results", [])
         ]
         self._passed_tests = sum(1 for result in self._last_test_results if result.passed)
-        self._all_tests_passed = self._passed_tests == len(TEST_CASES)
+        self._all_tests_passed = self._passed_tests == len(self._test_cases)
 
         reward = 0.0
         if self._all_tests_passed:
@@ -299,7 +289,7 @@ class CodingEnvironment(Environment):
                 actual="TIMEOUT",
                 passed=False,
             )
-            for case in TEST_CASES
+            for case in self._test_cases
         ]
 
     def _build_test_runner(self) -> str:
@@ -312,8 +302,7 @@ class CodingEnvironment(Environment):
 
             RESULT_PATH = os.environ["OPENENV_RESULT_PATH"]
             SOLUTION_PATH = os.environ["OPENENV_SOLUTION_PATH"]
-            TEST_CASES = {repr(TEST_CASES)}
-            FUNCTION_NAME = {repr(TARGET_FUNCTION)}
+            TEST_CASES = {repr(self._test_cases)}
 
             def load_module():
                 spec = importlib.util.spec_from_file_location("debug_solution", SOLUTION_PATH)
@@ -329,10 +318,13 @@ class CodingEnvironment(Environment):
 
             try:
                 module = load_module()
-                target = getattr(module, FUNCTION_NAME)
                 for case in TEST_CASES:
                     try:
-                        actual = target(case["input"])
+                        args = case["input"]
+                        if not isinstance(args, list):
+                            args = [args]
+                        target = getattr(module, case["function_name"])
+                        actual = target(*args)
                         payload["test_results"].append({{
                             "input": case["input"],
                             "expected": case["expected"],
@@ -365,7 +357,8 @@ class CodingEnvironment(Environment):
         )
 
     def _build_inspection_runner(self, var_name: str) -> str:
-        inspect_input = self._select_inspection_input()
+        inspect_case = self._select_inspection_case()
+        inspect_input = inspect_case["input"]
         return textwrap.dedent(
             f"""
             import importlib.util
@@ -376,7 +369,7 @@ class CodingEnvironment(Environment):
 
             RESULT_PATH = os.environ["OPENENV_RESULT_PATH"]
             SOLUTION_PATH = os.environ["OPENENV_SOLUTION_PATH"]
-            FUNCTION_NAME = {repr(TARGET_FUNCTION)}
+            FUNCTION_NAME = {repr(inspect_case["function_name"])}
             VAR_NAME = {repr(var_name)}
             TEST_INPUT = {repr(inspect_input)}
 
@@ -403,7 +396,10 @@ class CodingEnvironment(Environment):
                 target = getattr(module, FUNCTION_NAME)
                 sys.settrace(tracer)
                 try:
-                    target(TEST_INPUT)
+                    args = TEST_INPUT
+                    if not isinstance(args, list):
+                        args = [args]
+                    target(*args)
                 finally:
                     sys.settrace(None)
                 payload["variables"] = {{VAR_NAME: captured.get(VAR_NAME, "UNAVAILABLE")}}
@@ -418,8 +414,10 @@ class CodingEnvironment(Environment):
             """
         )
 
-    def _select_inspection_input(self) -> Any:
+    def _select_inspection_case(self) -> Dict[str, Any]:
         for result in self._last_test_results:
             if not result.passed:
-                return result.input
-        return TEST_CASES[0]["input"]
+                for case in self._test_cases:
+                    if case["input"] == result.input:
+                        return case
+        return self._test_cases[0]

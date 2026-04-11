@@ -12,7 +12,10 @@ from openenv.core import EnvClient
 from openenv.core.client_types import StepResult
 from openenv.core.env_server.types import State
 
-from models import CodingAction, CodingObservation
+try:
+    from .models import CodingAction, CodingObservation
+except ImportError:
+    from models import CodingAction, CodingObservation
 
 
 class CodingEnv(EnvClient[CodingAction, CodingObservation, State]):

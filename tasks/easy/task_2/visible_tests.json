@@ -1,0 +1,17 @@
+[
+  {
+    "function_name": "circle_area",
+    "input": [1],
+    "expected": 3.141592653589793
+  },
+  {
+    "function_name": "circle_area",
+    "input": [2],
+    "expected": 12.566370614359172
+  },
+  {
+    "function_name": "circle_area",
+    "input": [0],
+    "expected": 0.0
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "function_name": "final_price",
+    "input": [100, 25],
+    "expected": 75.0
+  },
+  {
+    "function_name": "final_price",
+    "input": [80, 10],
+    "expected": 72.0
+  },
+  {
+    "function_name": "final_price",
+    "input": [50, 0],
+    "expected": 50.0
+  },
+  {
+    "function_name": "final_price",
+    "input": [200, 100],
+    "expected": 0.0
+  }
+]

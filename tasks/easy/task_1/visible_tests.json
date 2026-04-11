@@ -1,0 +1,17 @@
+[
+  {
+    "function_name": "add_numbers",
+    "input": [1, 2],
+    "expected": 3
+  },
+  {
+    "function_name": "add_numbers",
+    "input": [-4, 9],
+    "expected": 5
+  },
+  {
+    "function_name": "add_numbers",
+    "input": [0, 0],
+    "expected": 0
+  }
+]

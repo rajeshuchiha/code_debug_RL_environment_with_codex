@@ -1,0 +1,17 @@
+[
+  {
+    "function_name": "first_item",
+    "input": [[3, 4, 5]],
+    "expected": 3
+  },
+  {
+    "function_name": "first_item",
+    "input": [["alpha", "beta"]],
+    "expected": "alpha"
+  },
+  {
+    "function_name": "first_item",
+    "input": [[]],
+    "expected": null
+  }
+]

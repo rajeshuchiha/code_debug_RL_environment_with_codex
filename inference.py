@@ -33,6 +33,8 @@ BENCHMARK = os.getenv("BENCHMARK", "coding_env")
 MAX_STEPS = int(os.getenv("MAX_STEPS", "20"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "220"))
+TASK_DIFFICULTY = os.getenv("TASK_DIFFICULTY", "easy")
+TASK_ID = os.getenv("TASK_ID")
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
@@ -94,6 +96,16 @@ def summarize_tests(observation: CodingObservation) -> str:
     return "\n".join(lines)
 
 
+def summarize_task_metadata(observation: CodingObservation) -> str:
+    metadata = observation.metadata or {}
+    task_info = {
+        "difficulty": metadata.get("difficulty"),
+        "task_name": metadata.get("task_name"),
+        "visible_tests": metadata.get("visible_tests", []),
+    }
+    return json.dumps(task_info, ensure_ascii=True, indent=2)
+
+
 def build_user_prompt(
     step: int,
     observation: CodingObservation,
@@ -105,6 +117,10 @@ def build_user_prompt(
         f"""
         Step: {step}
         Last reward: {last_reward:.2f}
+
+        Selected task metadata and visible tests:
+        {summarize_task_metadata(observation)}
+
         Current code:
         {observation.code}
 
@@ -222,7 +238,10 @@ async def main() -> None:
 
     env = await create_env()
     try:
-        result = await env.reset()
+        reset_kwargs: Dict[str, Any] = {"difficulty": TASK_DIFFICULTY}
+        if TASK_ID:
+            reset_kwargs["task_name"] = TASK_ID
+        result = await env.reset(**reset_kwargs)
         observation = result.observation
         last_reward = 0.0
 
