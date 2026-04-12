@@ -1,6 +1,6 @@
 ---
 title: Coding Env Debugging Environment Server
-emoji: tools
+emoji: 🛠️
 colorFrom: blue
 colorTo: green
 sdk: docker
