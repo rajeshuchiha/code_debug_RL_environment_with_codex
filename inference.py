@@ -18,8 +18,12 @@ try:
     from models import CodingAction, CodingObservation
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from client import CodingEnv
-    from models import CodingAction, CodingObservation
+    try:
+        from client import CodingEnv
+        from models import CodingAction, CodingObservation
+    except ImportError:
+        from client import CodingEnv
+        from models import CodingAction, CodingObservation
     
 load_dotenv()
 
@@ -32,29 +36,53 @@ TASK_NAME = os.getenv("TASK_NAME", "debug-python-function")
 BENCHMARK = os.getenv("BENCHMARK", "coding_env")
 MAX_STEPS = int(os.getenv("MAX_STEPS", "20"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "220"))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "512"))
 TASK_DIFFICULTY = os.getenv("TASK_DIFFICULTY", "easy")
 TASK_ID = os.getenv("TASK_ID")
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
-    You are solving a deterministic Python debugging task.
-    You must reply with exactly one JSON object and no extra text.
+    You are an autonomous agent operating in a Python coding environment.
+    Your goal is to make all visible tests pass by observing the environment
+    and taking one action at a time.
 
-    Allowed actions:
-    {"action_type":"run_tests"}
-    {"action_type":"get_stack_trace"}
-    {"action_type":"inspect_variable","var_name":"total"}
-    {"action_type":"edit_line","line_no":4,"new_code":"    total = 0"}
-    {"action_type":"insert_line","line_no":3,"code":"    print(numbers)"}
-    {"action_type":"delete_line","line_no":7}
+    On each step you receive:
+    - The current source code (with 1-based line numbers)
+    - Task metadata and visible tests
+    - Execution output: stdout, stderr, exceptions, stack traces
+    - Inspected variable values (if requested)
+    - Test results
 
-    Rules:
-    - Prefer run_tests first.
-    - Use get_stack_trace or inspect_variable when tests fail and you need more evidence.
-    - Only edit one line per step.
-    - Keep line numbers 1-based.
-    - Return valid JSON only.
+    Available actions (return exactly one as valid JSON, no markdown):
+
+    Run all visible tests:
+      {"action_type": "run_tests"}
+
+    Get the current stack trace:
+      {"action_type": "get_stack_trace"}
+
+    Inspect a variable by name:
+      {"action_type": "inspect_variable", "var_name": "<name>"}
+
+    Replace a single line (1-based):
+      {"action_type": "edit_line", "line_no": <n>, "new_code": "<replacement>"}
+
+    Replace a range of lines (inclusive, 1-based):
+      {"action_type": "edit_block", "start_line": <n>, "end_line": <m>, "new_code": "<replacement>"}
+
+    Insert a new line before a given line:
+      {"action_type": "insert_line", "line_no": <n>, "code": "<new line>"}
+
+    Delete a line:
+      {"action_type": "delete_line", "line_no": <n>}
+
+    Strategy:
+    - Start with run_tests unless the bug is immediately obvious.
+    - Use get_stack_trace or inspect_variable to gather evidence before editing.
+    - Prefer edit_block for multi-line or structural fixes.
+    - Prefer edit_line for isolated single-line fixes.
+    - Base all decisions strictly on observed output — never assume hidden behavior.
+    - Return one JSON object only. No explanation, no markdown fences.
     """
 ).strip()
 
@@ -106,6 +134,13 @@ def summarize_task_metadata(observation: CodingObservation) -> str:
     return json.dumps(task_info, ensure_ascii=True, indent=2)
 
 
+def format_numbered_code(code: str) -> str:
+    lines = code.splitlines()
+    if not lines:
+        return "1 | "
+    return "\n".join(f"{index} | {line}" for index, line in enumerate(lines, start=1))
+
+
 def build_user_prompt(
     step: int,
     observation: CodingObservation,
@@ -121,8 +156,8 @@ def build_user_prompt(
         Selected task metadata and visible tests:
         {summarize_task_metadata(observation)}
 
-        Current code:
-        {observation.code}
+        Current code with 1-based line numbers:
+        {format_numbered_code(observation.code)}
 
         Stdout:
         {observation.stdout or "None"}
@@ -161,20 +196,7 @@ def parse_action_response(raw_text: str) -> Dict[str, Any]:
 
 
 def fallback_action(step: int, observation: CodingObservation) -> Dict[str, Any]:
-    if step == 1 or not observation.test_results:
-        return {"action_type": "run_tests"}
-    if observation.exception and not observation.stack_trace:
-        return {"action_type": "get_stack_trace"}
-    if observation.exception and "len(value)" in observation.stack_trace:
-        return {
-            "action_type": "edit_line",
-            "line_no": 7,
-            "new_code": "    average = total / len(numbers)",
-        }
-    if observation.exception and not observation.variables:
-        return {"action_type": "inspect_variable", "var_name": "total"}
-    if observation.variables.get("total") == "13":
-        return {"action_type": "edit_line", "line_no": 4, "new_code": "    total = 0"}
+    
     return {"action_type": "run_tests"}
 
 

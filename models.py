@@ -22,6 +22,7 @@ class CodingAction(Action):
         "run_tests",
         "inspect_variable",
         "get_stack_trace",
+        "edit_block",
     ] = Field(..., description="The action to execute.")
     line_no: Optional[int] = Field(
         default=None,
@@ -40,6 +41,34 @@ class CodingAction(Action):
         default=None,
         description="Variable name to inspect for inspect_variable.",
     )
+    start_line: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="1-based start line for edit_block.",
+    )
+    end_line: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="1-based inclusive end line for edit_block.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def flatten_parameters(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if data.get("action_type") != "edit_block":
+            return data
+
+        values = dict(data)
+        parameters = values.pop("parameters", None)
+        if isinstance(parameters, dict):
+            for key in ("start_line", "end_line", "new_code"):
+                if key in parameters and key not in values:
+                    values[key] = parameters[key]
+            if "new_code_block" in parameters and "new_code" not in values:
+                values["new_code"] = parameters["new_code_block"]
+        return values
 
     @model_validator(mode="after")
     def validate_payload(self) -> "CodingAction":
@@ -52,6 +81,15 @@ class CodingAction(Action):
             raise ValueError("code is required for insert_line")
         if self.action_type == "inspect_variable" and not self.var_name:
             raise ValueError("var_name is required for inspect_variable")
+        if self.action_type == "edit_block":
+            if self.start_line is None:
+                raise ValueError("start_line is required for edit_block")
+            if self.end_line is None:
+                raise ValueError("end_line is required for edit_block")
+            if self.end_line < self.start_line:
+                raise ValueError("end_line must be greater than or equal to start_line")
+            if self.new_code is None:
+                raise ValueError("new_code is required for edit_block")
         return self
 
 

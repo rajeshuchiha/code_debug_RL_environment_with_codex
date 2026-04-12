@@ -108,7 +108,21 @@ class CodingEnvironment(Environment):
 
         try:
             if action.action_type == "edit_line":
-                self._replace_line(action.line_no or 1, action.new_code or "")
+                if action.line_no is None:
+                    raise ValueError("line_no required")
+                self._replace_line(action.line_no, action.new_code or "")
+            elif action.action_type == "edit_block":
+                if self._replace_block(
+                    action.start_line,
+                    action.end_line,
+                    action.new_code or "",
+                ):
+                    if action.start_line is not None and action.end_line is not None:
+                        total_lines = max(1, len(self._code_lines))
+                        change_ratio = (action.end_line - action.start_line + 1)*1.0 / total_lines
+                        reward -= 0.1*change_ratio
+                else:
+                    reward -= 0.2
             elif action.action_type == "insert_line":
                 self._insert_line(action.line_no or 1, action.code or "")
             elif action.action_type == "delete_line":
@@ -168,6 +182,25 @@ class CodingEnvironment(Environment):
     def _delete_line(self, line_no: int) -> None:
         self._validate_line_number(line_no, allow_endpoint=False)
         del self._code_lines[line_no - 1]
+
+    def _replace_block(
+        self,
+        start_line: Optional[int],
+        end_line: Optional[int],
+        new_code: str,
+    ) -> bool:
+        if start_line is None or end_line is None:
+            return False
+        if start_line < 1 or end_line < start_line:
+            return False
+        if not self._code_lines:
+            return False
+        if start_line > len(self._code_lines) or end_line > len(self._code_lines):
+            return False
+
+        replacement = new_code.splitlines()
+        self._code_lines[start_line-1 : end_line] = replacement
+        return True
 
     def _validate_line_number(self, line_no: int, allow_endpoint: bool) -> None:
         max_line = len(self._code_lines) + (1 if allow_endpoint else 0)
