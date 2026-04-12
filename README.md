@@ -24,9 +24,10 @@ Tasks are loaded from `tasks/{difficulty}/task_x/` through `tasks.loader.load_ta
 Actions are typed through `CodingAction` in `models.py`.
 
 ```python
-CodingAction(action_type="edit_line", line_no=2, new_code="    return a + b")
-CodingAction(action_type="insert_line", line_no=1, code="import math")
-CodingAction(action_type="delete_line", line_no=7)
+CodingAction(action_type="edit_line", line_no=<n>, new_code="<replacement>")
+CodingAction(action_type="edit_block", start_line=<n>, end_line=<m>, new_code="<replacement>")
+CodingAction(action_type="insert_line", line_no=<n>, code="<new line>")
+CodingAction(action_type="delete_line", line_no=<n>)
 CodingAction(action_type="run_tests")
 CodingAction(action_type="inspect_variable", var_name="total")
 CodingAction(action_type="get_stack_trace")
@@ -35,6 +36,7 @@ CodingAction(action_type="get_stack_trace")
 Supported action types:
 
 - `edit_line(line_no, new_code)`: Replace a 1-based line with new code.
+- `edit_block(start_line, end_line, new_code)`: Replace/Insert new code between start_line and end_line (1-based inclusive).
 - `insert_line(line_no, code)`: Insert code before a 1-based line.
 - `delete_line(line_no)`: Delete a 1-based line.
 - `run_tests()`: Execute the deterministic test suite.
@@ -100,6 +102,8 @@ The environment uses the project reward policy:
 - `-0.2` for runtime or syntax errors.
 - `-0.05` per step.
 - `-0.5` for timeouts.
+- `-0.1` for invalid code edits.
+- `-0.1*change_ratio` for limiting large code edits.
 
 Code execution always happens in a subprocess with a 2-second timeout.
 

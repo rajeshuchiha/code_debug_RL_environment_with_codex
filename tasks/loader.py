@@ -72,6 +72,3 @@ def load_task(
         "visible_tests": visible_tests,
     }
 
-
-# TODO(inference.py): Include selected task metadata and visible tests in the
-# model prompt when edits outside tasks/ are allowed.

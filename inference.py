@@ -37,7 +37,7 @@ BENCHMARK = os.getenv("BENCHMARK", "coding_env")
 MAX_STEPS = int(os.getenv("MAX_STEPS", "20"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "512"))
-TASK_DIFFICULTY = os.getenv("TASK_DIFFICULTY", "easy")
+# TASK_DIFFICULTY = os.getenv("TASK_DIFFICULTY", "easy")
 TASK_ID = os.getenv("TASK_ID")
 
 SYSTEM_PROMPT = textwrap.dedent(
@@ -249,68 +249,82 @@ async def create_env() -> CodingEnv:
 async def main() -> None:
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-    history: List[str] = []
-    rewards: List[float] = []
-    steps_taken = 0
-    score = 0.0
-    success = False
-    observation = CodingObservation()
-
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     env = await create_env()
+    
+    all_rewards: List[float] = []
+    all_scores: List[float] = []
+
     try:
-        reset_kwargs: Dict[str, Any] = {"difficulty": TASK_DIFFICULTY}
-        if TASK_ID:
-            reset_kwargs["task_name"] = TASK_ID
-        result = await env.reset(**reset_kwargs)
-        observation = result.observation
-        last_reward = 0.0
+        
+        for difficulty in ["easy", "medium", "hard"]:
+            
+            history: List[str] = []
+            rewards: List[float] = []
+            steps_taken = 0
+            score = 0.0
+            success = False
+            observation = CodingObservation()
 
-        for step in range(1, MAX_STEPS + 1):
-            if result.done:
-                break
+            reset_kwargs: Dict[str, Any] = {"difficulty": difficulty}  # ← uses loop var
+            if TASK_ID:
+                reset_kwargs["task_name"] = TASK_ID
 
-            action_payload = get_model_action(client, step, observation, last_reward, history)
-            error: Optional[str] = None
-
-            try:
-                action = CodingAction(**action_payload)
-            except Exception as exc:
-                error = str(exc)
-                action_payload = fallback_action(step, observation)
-                action = CodingAction(**action_payload)
-
-            result = await env.step(action)
+            result = await env.reset(**reset_kwargs)
             observation = result.observation
+            last_reward = 0.0
 
-            reward = float(result.reward or 0.0)
-            done = result.done
-            error = error or (observation.exception if observation.exception else None)
+            for step in range(1, MAX_STEPS + 1):
+                if result.done:
+                    break
 
-            rewards.append(reward)
-            steps_taken = step
-            last_reward = reward
+                action_payload = get_model_action(client, step, observation, last_reward, history)
+                error: Optional[str] = None
 
-            action_str = format_action(action_payload)
-            log_step(step=step, action=action_str, reward=reward, done=done, error=error)
+                try:
+                    action = CodingAction(**action_payload)
+                except Exception as exc:
+                    error = str(exc)
+                    action_payload = fallback_action(step, observation)
+                    action = CodingAction(**action_payload)
 
-            history.append(
-                f"Step {step}: {action_str} -> reward {reward:+.2f}, tests={summarize_tests(observation)}"
-            )
+                result = await env.step(action)
+                observation = result.observation
 
-            if done:
-                break
+                reward = float(result.reward or 0.0)
+                done = result.done
+                error = error or (observation.exception if observation.exception else None)
 
-        score = compute_score(observation)
-        success = score >= 1.0 and all(result.passed for result in observation.test_results)
+                rewards.append(reward)
+                steps_taken = step
+                last_reward = reward
+
+                action_str = format_action(action_payload)
+                log_step(step=step, action=action_str, reward=reward, done=done, error=error)
+
+                history.append(
+                    f"Step {step}: {action_str} -> reward {reward:+.2f}, tests={summarize_tests(observation)}"
+                )
+
+                if done:
+                    break
+
+            score = compute_score(observation)
+            success = score >= 1.0 and all(result.passed for result in observation.test_results)
+
+            all_rewards.extend(rewards)
+            all_scores.append(score)
+
+            # ✅ Log per-difficulty result
+            print(f"[DIFFICULTY] level={difficulty} score={score:.3f} success={str(success).lower()}", flush=True)
+            log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
     finally:
         try:
             await env.close()
         except Exception as exc:
             print(f"[DEBUG] env.close() error: {exc}", flush=True)
-        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
 
 if __name__ == "__main__":

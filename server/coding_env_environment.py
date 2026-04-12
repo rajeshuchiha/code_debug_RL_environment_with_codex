@@ -122,22 +122,36 @@ class CodingEnvironment(Environment):
                         change_ratio = (action.end_line - action.start_line + 1)*1.0 / total_lines
                         reward -= 0.1*change_ratio
                 else:
-                    reward -= 0.2
+                    reward -= 0.1
             elif action.action_type == "insert_line":
+                if action.line_no is None:
+                    raise ValueError("line_no required")
                 self._insert_line(action.line_no or 1, action.code or "")
             elif action.action_type == "delete_line":
+                if action.line_no is None:
+                    raise ValueError("line_no required")
                 self._delete_line(action.line_no or 1)
             elif action.action_type == "run_tests":
                 reward += self._run_tests(exec_timeout)
             elif action.action_type == "inspect_variable":
                 self._inspect_variable(action.var_name or "", exec_timeout)
+                if self._last_variables:  # successfully captured something
+                    reward += 0.02  # tiny signal that this was productive
             elif action.action_type == "get_stack_trace":   
                 if not self._last_stack_trace:
                     reward += self._run_tests(exec_timeout)
+                if self._last_stack_trace:
+                    reward += 0.01  # agent got useful debug info
+                    
+        except ValueError as exc:
+            self._last_exception = str(exc)
+            self._last_stack_trace = traceback.format_exc()
+            reward -= 0.1  # invalid edit
+
         except Exception as exc:
             self._last_exception = str(exc)
             self._last_stack_trace = traceback.format_exc()
-            reward -= 0.2
+            reward -= 0.2   # Runtime/system error
 
         done = self._all_tests_passed or self._state.step_count >= self.max_steps
         return self._build_observation(reward=reward, done=done)
@@ -156,7 +170,7 @@ class CodingEnvironment(Environment):
             test_results=self._last_test_results,
             variables=self._last_variables,
             step_count=self._state.step_count,
-            reward=reward,
+            reward=max(-1.0, min(1.0, reward)),
             done=done,
             metadata={
                 "max_steps": self.max_steps,
@@ -233,10 +247,14 @@ class CodingEnvironment(Environment):
 
         reward = 0.0
         if self._all_tests_passed:
-            reward += 1.0
+            # Harder tasks should give higher reward to signal difficulty
+            difficulty_bonus = {"easy": 0.0, "medium": 0.1, "hard": 0.2}
+            reward += 1.0 + difficulty_bonus.get(self._task.get("difficulty", "easy"), 0.0)
         elif self._passed_tests > previous_passed:
-            reward += 0.3
-
+            #Proportional to how many new tests passed
+            new_passes = self._passed_tests - previous_passed
+            total = max(1, len(self._test_cases))
+            reward += 0.3 * (new_passes / total)
         if execution["returncode"] != 0 or self._last_exception:
             reward -= 0.2
 
