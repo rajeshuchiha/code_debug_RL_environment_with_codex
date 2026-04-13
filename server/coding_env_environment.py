@@ -248,8 +248,8 @@ class CodingEnvironment(Environment):
         reward = 0.0
         if self._all_tests_passed:
             # Harder tasks should give higher reward to signal difficulty
-            difficulty_bonus = {"easy": 0.0, "medium": 0.1, "hard": 0.2}
-            reward += 1.0 + difficulty_bonus.get(self._task.get("difficulty", "easy"), 0.0)
+            difficulty_scores = {"easy": 0.89, "medium": 0.93, "hard": 0.97}
+            reward += difficulty_scores.get(self._task.get("difficulty", "easy"), 0.89)
         elif self._passed_tests > previous_passed:
             #Proportional to how many new tests passed
             new_passes = self._passed_tests - previous_passed

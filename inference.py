@@ -232,10 +232,14 @@ def format_action(action_payload: Dict[str, Any]) -> str:
 
 def compute_score(observation: CodingObservation) -> float:
     if not observation.test_results:
-        return 0.0
+        return 0.01   # not 0.0
     passed = sum(1 for result in observation.test_results if result.passed)
     total = len(observation.test_results)
-    return passed / total if total else 0.0
+    if total == 0:
+        return 0.01
+    raw = passed / total
+    # clamp strictly inside (0, 1)
+    return max(0.01, min(0.99, raw))
 
 
 async def create_env() -> CodingEnv:
@@ -311,7 +315,7 @@ async def main() -> None:
                     break
 
             score = compute_score(observation)
-            success = score >= 1.0 and all(result.passed for result in observation.test_results)
+            success = all(result.passed for result in observation.test_results)
 
             all_rewards.extend(rewards)
             all_scores.append(score)
